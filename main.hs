@@ -1,71 +1,64 @@
 import Data.List (transpose)
 
 type Pixels = [[Int]]
+type Cache = ([Int],[Int])
 
 loadPixels :: IO Pixels
 loadPixels = do
     contents <- readFile "source.txt"
     return $ map (map read . words) $ lines contents
 
-scanRow :: Int -> Pixels -> Int
-scanRow size pixels =
-    if (length pixels) < size
-        then 0
-        else 
-            let
-                row1:row2:_ = pixels
-                row = zip row1 row2
-                rest = drop size pixels
-            in
-                sum [abs (a-b) | (a,b) <- row] + scanRow size rest
-
-
-testScan :: Int -> Int -> Int -> Pixels -> Int -> Int -> Float
-testScan offsetX offsetY size pixels width height =
+scanRow :: Pixels -> [Int]
+scanRow    [_] = []
+scanRow (row1:row2:rest) =
     let
-        row = scanRow size $ drop offsetY pixels
-        col = scanRow size $ drop offsetX (transpose pixels)
+        row = zip row1 row2
     in
-        ((fromIntegral row) / fromIntegral (height `div` size) )+ ((fromIntegral col) / fromIntegral (width `div` size))
+        (sum [abs (a-b) | (a,b) <- row] ):scanRow (row2:rest)
 
-findBestOffsetX :: Int -> Pixels -> Int -> Int -> Int -> Int -> (Int, Float)
-findBestOffsetX     _      _        _       _      _      (-1) = (0, -1)
-findBestOffsetX    size   pixels   width  height offsetY maxOffsetX =
-    let
-        this = testScan maxOffsetX offsetY size pixels width height
-        next@(_,another) = findBestOffsetX size pixels width height offsetY (maxOffsetX-1)
-    in
-        if this > another
-            then (maxOffsetX, this)
-            else next
 
-findBestOffset :: Int -> Pixels -> Int -> Int -> Int  -> (Int, Int, Float)
-findBestOffset    _       _        _       _     (-1) =  (-1, -1, -1)
-findBestOffset   size    pixels   width   height  maxOffsetY = 
-    let 
-        (x,this) = findBestOffsetX size pixels width height maxOffsetY (size-1)
-        next@(_,_,another) = findBestOffset size pixels width height (maxOffsetY-1)
-    in
-        if this>another
-            then (x, maxOffsetY,this)
-            else next
 
-findBestSize :: Pixels -> Int -> Int -> Int -> (Int, Int, Int, Float)
-findBestSize     _         _      _      3 = (0, 0, 0, -1)
-findBestSize     pixels   width  height  maxSize =
-    let
-        (x,y,this) = findBestOffset maxSize pixels width height (maxSize-1) 
-        next@(_,_,_,another) = findBestSize pixels width height (maxSize-1)
-    in
-        if this<another
-            then (maxSize, x,y,this)
-            else next
+testScan :: Int -> Int -> Int -> Cache -> Int -> Int -> IO Float
+testScan offsetX offsetY size cache width height= do
+    let row = sum [(fst cache) !! y | y <- [offsetY..height-1] , (y-offsetY) `mod` size == 0]
+    let col = sum [(snd cache) !! x | x <- [offsetX..width-1] , (x-offsetX) `mod` size == 0]
+    let result = ((fromIntegral row) / fromIntegral (height `div` size) ) + ((fromIntegral col) / fromIntegral (width `div` size))
+    putStrLn $ "size:" ++ show size ++ "\tox: " ++ show offsetX ++ "\toy: " ++ show offsetY ++ "\tresult:" ++ show result
+    return result
+
+findBestOffsetX :: Int -> Cache -> Int -> Int -> Int -> Int -> IO (Int, Float)
+findBestOffsetX     _      _        _       _      _      (-1) = return (0, -1)
+findBestOffsetX    size   cache   width  height offsetY maxOffsetX =do
+    this <- testScan maxOffsetX offsetY size cache width height
+    next@(_,another) <- findBestOffsetX size cache width height offsetY (maxOffsetX-1)
+    if this > another
+        then return (maxOffsetX, this)
+        else return next
+
+findBestOffset :: Int -> Cache -> Int -> Int -> Int  -> IO (Int, Int, Float)
+findBestOffset    _       _        _       _     (-1) =  return (-1, -1, -1)
+findBestOffset   size    cache   width   height  maxOffsetY = do
+    (x,this) <- findBestOffsetX size cache width height maxOffsetY (size-1)
+    next@(_,_,another) <- findBestOffset size cache width height (maxOffsetY-1)
+    if this > another
+        then return (x, maxOffsetY,this)
+        else return next
+
+findBestSize :: Cache -> Int -> Int -> Int -> IO (Int, Int, Int, Float)
+findBestSize     _         _      _      3 = return (0, 0, 0, -1)
+findBestSize     cache   width  height  maxSize = do
+    (x,y,this) <- findBestOffset maxSize cache width height (maxSize-1) 
+    next@(_,_,_,another) <- findBestSize cache width height (maxSize-1)
+    if this > another
+        then return (maxSize, x,y,this)
+        else return next
 
 main = do
     pixels <- loadPixels
     let height = length pixels
     let width = length $ head pixels
-    let (size,offsetX,offsetY,_)=findBestSize pixels width height 3 --(min width height `div` 30)
+    let cache = (scanRow pixels, scanRow $ transpose pixels)
+    (size,offsetX,offsetY,_) <- findBestSize cache width height 30 --(min width height `div` 30)
     putStrLn $ show size
     putStrLn $ show offsetX
     putStrLn $ show offsetY
